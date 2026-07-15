@@ -1,0 +1,25 @@
+[llama_cpp]
+# If set, wins over PATH and the bin/ subdir. Can be a directory or a direct exe path.
+binary_path_override = ""
+bin_subdir = "bin"
+
+[models]
+# Used when a profile gives a bare filename instead of an absolute path.
+default_dir = "models"
+
+[output]
+default_mode = "in_place"   # in_place | output_dir
+overwrite = false
+recursive = false
+
+[generation]
+# Per-image subprocess timeout safety net (seconds).
+timeout_seconds = 300
+
+[logging]
+level = "INFO"
+
+[preprocessing]
+# Target megapixels to resize images to before captioning. 0 = disabled.
+# --size on the CLI overrides this per-run.
+resize_megapixels = 0.0
