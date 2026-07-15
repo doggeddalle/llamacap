@@ -3,6 +3,8 @@
 Batch-captions images with a local llama.cpp GGUF vision-language model, producing
 per-image `.txt` sidecar captions for LoRA training data (Kohya-ss convention).
 
+Initial captioning scope profile is Krea 2, roadmap is to add more soon. Configs are entirely customizable and you can create your own.
+
 ## Setup
 
 ```
