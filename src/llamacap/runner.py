@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import tempfile
@@ -9,15 +10,16 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from llamacap.binary_resolver import resolve_llama_mtmd_cli
+from llamacap.binary_resolver import resolve_llama_server
 from llamacap.captioner import generate_caption
 from llamacap.config import GlobalConfig
-from llamacap.errors import CaptionGenerationError
+from llamacap.errors import CaptionGenerationError, LlamacapError
 from llamacap.image_utils import list_images, validate_image
 from llamacap.model_resolver import resolve_model_dir
 from llamacap.postprocess import apply_trigger_word
 from llamacap.profiles import Profile, TriggerWordConfig, load_profile
 from llamacap.resize import resize_for_analysis
+from llamacap.server import LlamaServer
 from llamacap.sidecar import should_skip, sidecar_path_for, write_caption
 
 logger = logging.getLogger("llamacap")
@@ -34,11 +36,13 @@ class BatchOptions:
     llama_bin_override: str | None
     trigger_override: str | None = None
     model_dir: Path | None = None
-    resize_megapixels: float = 0.0
+    # None = fall back to config.toml; an explicit 0 disables resizing.
+    resize_megapixels: float | None = None
     prompt_override: str | None = None
     seed_override: int | None = None
     dry_run: bool = False
     interactive: bool = False
+    progress_json: bool = False
 
 
 @dataclass
@@ -54,7 +58,7 @@ class BatchResult:
 
 
 def run_batch(config: GlobalConfig, options: BatchOptions) -> BatchResult:
-    binary = resolve_llama_mtmd_cli(config, options.llama_bin_override)
+    binary = resolve_llama_server(config, options.llama_bin_override)
 
     model_override = (
         resolve_model_dir(options.model_dir, interactive=options.interactive)
@@ -74,7 +78,11 @@ def run_batch(config: GlobalConfig, options: BatchOptions) -> BatchResult:
     if options.seed_override is not None:
         profile.generation.seed = options.seed_override
 
-    resize_megapixels = options.resize_megapixels or config.preprocessing.resize_megapixels
+    resize_megapixels = (
+        options.resize_megapixels
+        if options.resize_megapixels is not None
+        else config.preprocessing.resize_megapixels
+    )
 
     logger.info("Profile: %s (%s)", profile.name, profile.description)
     logger.info("gguf: %s", profile.gguf_path)
@@ -103,49 +111,115 @@ def run_batch(config: GlobalConfig, options: BatchOptions) -> BatchResult:
     if resize_megapixels:
         tmp_dir = Path(tempfile.mkdtemp(prefix="llamacap_resize_"))
 
+    server = LlamaServer(binary, profile, config.generation.server_startup_timeout_seconds)
+
+    if options.progress_json:
+        _emit_progress("start", total=len(images))
+        bar = None
+        iterator = images
+    else:
+        bar = tqdm(images, desc="Captioning", unit="img")
+        iterator = bar
+
     try:
-        for image_path in tqdm(images, desc="Captioning", unit="img"):
-            sidecar_path = sidecar_path_for(
-                image_path, options.input_dir, options.output_dir, profile.output_suffix
+        server.start()
+
+        for done, image_path in enumerate(iterator, start=1):
+            _process_image(
+                image_path, server, profile, config, options, tmp_dir,
+                resize_megapixels, result,
             )
-
-            if should_skip(sidecar_path, options.overwrite):
-                result.skipped += 1
-                continue
-
-            error = validate_image(image_path)
-            if error:
-                result.failed += 1
-                result.failures.append((image_path, error))
-                continue
-
-            analysis_path = image_path
-            if tmp_dir is not None:
-                try:
-                    analysis_path = resize_for_analysis(image_path, resize_megapixels, tmp_dir)
-                except Exception as e:
-                    result.failed += 1
-                    result.failures.append((image_path, f"resize failed: {e}"))
-                    continue
-
-            try:
-                raw_caption = generate_caption(
-                    binary, profile, analysis_path, config.generation.timeout_seconds
+            if bar is not None:
+                bar.set_postfix(
+                    ok=result.succeeded, skip=result.skipped, fail=result.failed
                 )
-            except CaptionGenerationError as e:
-                result.failed += 1
-                result.failures.append((image_path, str(e)))
-                continue
-
-            final_caption = apply_trigger_word(raw_caption, profile.trigger_word)
-            write_caption(sidecar_path, final_caption)
-            result.succeeded += 1
+            if options.progress_json:
+                _emit_progress(
+                    "image",
+                    done=done,
+                    total=len(images),
+                    ok=result.succeeded,
+                    skip=result.skipped,
+                    fail=result.failed,
+                    current=image_path.name,
+                )
     finally:
+        if bar is not None:
+            bar.close()
+        server.stop()
         if tmp_dir is not None:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
+    if options.progress_json:
+        _emit_progress(
+            "end", ok=result.succeeded, skip=result.skipped, fail=result.failed
+        )
     _report(result, options.input_dir)
     return result
+
+
+def _process_image(
+    image_path: Path,
+    server: LlamaServer,
+    profile: Profile,
+    config: GlobalConfig,
+    options: BatchOptions,
+    tmp_dir: Path | None,
+    resize_megapixels: float,
+    result: BatchResult,
+) -> None:
+    sidecar_path = sidecar_path_for(
+        image_path, options.input_dir, options.output_dir, profile.output_suffix
+    )
+
+    if should_skip(sidecar_path, options.overwrite):
+        result.skipped += 1
+        return
+
+    error = validate_image(image_path)
+    if error:
+        result.failed += 1
+        result.failures.append((image_path, error))
+        return
+
+    analysis_path = image_path
+    if tmp_dir is not None:
+        try:
+            analysis_path = resize_for_analysis(image_path, resize_megapixels, tmp_dir)
+        except Exception as e:
+            result.failed += 1
+            result.failures.append((image_path, f"resize failed: {e}"))
+            return
+
+    try:
+        raw_caption = generate_caption(
+            server, profile, analysis_path, config.generation.timeout_seconds
+        )
+    except CaptionGenerationError as e:
+        if not server.is_running:
+            # The server itself died (crash, OOM, killed): abort the batch with
+            # its log instead of failing every remaining image one by one.
+            raise LlamacapError(
+                f"llama-server terminated unexpectedly while captioning "
+                f"{image_path.name} ({result.succeeded} captioned before the crash).\n"
+                f"Log tail:\n{server.log_tail()}"
+            ) from e
+        result.failed += 1
+        result.failures.append((image_path, str(e)))
+        return
+
+    final_caption = apply_trigger_word(raw_caption, profile.trigger_word)
+    try:
+        write_caption(sidecar_path, final_caption)
+    except OSError as e:
+        result.failed += 1
+        result.failures.append((image_path, f"could not write sidecar: {e}"))
+        return
+    result.succeeded += 1
+
+
+def _emit_progress(event: str, **fields) -> None:
+    print("@@LLAMACAP@@ " + json.dumps({"event": event, **fields}), flush=True)
 
 
 def _dry_run(profile: Profile, images: list[Path], options: BatchOptions) -> BatchResult:

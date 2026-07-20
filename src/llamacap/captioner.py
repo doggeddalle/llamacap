@@ -1,68 +1,83 @@
 from __future__ import annotations
 
+import base64
+import json
 import logging
-import subprocess
+import mimetypes
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from llamacap.errors import CaptionGenerationError
 from llamacap.profiles import Profile
+from llamacap.server import LlamaServer
 
 logger = logging.getLogger("llamacap")
 
 
-def build_argv(binary: Path, profile: Profile, image_path: Path) -> list[str]:
+def build_payload(profile: Profile, image_path: Path) -> dict:
     gen = profile.generation
-    argv = [
-        str(binary),
-        "-m", str(profile.gguf_path),
-        "--mmproj", str(profile.mmproj_path),
-        "--image", str(image_path),
-        "-p", profile.prompt_text,
-        "-ngl", str(gen.ngl),
-        "-c", str(gen.ctx_size),
-        "-n", str(gen.n_predict),
-        "--temp", str(gen.temperature),
-        "--top-p", str(gen.top_p),
-        "--top-k", str(gen.top_k),
-        "--repeat-penalty", str(gen.repeat_penalty),
-        "--image-min-tokens", str(gen.image_min_tokens),
-        "--seed", str(gen.seed),
-    ]
-    if gen.no_warmup:
-        argv.append("--no-warmup")
-    argv.extend(gen.extra_args)
-    return argv
+    mime_type, _ = mimetypes.guess_type(image_path.name)
+    mime_type = mime_type or "application/octet-stream"
+    b64_data = base64.b64encode(image_path.read_bytes()).decode("ascii")
+
+    return {
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": profile.prompt_text},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime_type};base64,{b64_data}"},
+                    },
+                ],
+            }
+        ],
+        "temperature": gen.temperature,
+        "top_p": gen.top_p,
+        "top_k": gen.top_k,
+        "repeat_penalty": gen.repeat_penalty,
+        "seed": gen.seed,
+        "max_tokens": gen.n_predict,
+        "stream": False,
+    }
 
 
 def generate_caption(
-    binary: Path,
+    server: LlamaServer,
     profile: Profile,
     image_path: Path,
     timeout_seconds: int,
 ) -> str:
-    argv = build_argv(binary, profile, image_path)
-    logger.debug("argv: %s", argv)
+    payload = build_payload(profile, image_path)
+    logger.debug("request payload (image omitted): %s", {**payload, "messages": "<omitted>"})
+
+    request = urllib.request.Request(
+        f"{server.base_url}/v1/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
     try:
-        result = subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout_seconds,
-        )
-    except subprocess.TimeoutExpired as e:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        excerpt = e.read().decode("utf-8", errors="replace").strip()[-500:]
         raise CaptionGenerationError(
-            f"timed out after {timeout_seconds}s"
+            f"llama-server returned HTTP {e.code}: {excerpt}"
         ) from e
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        raise CaptionGenerationError(f"request to llama-server failed: {e}") from e
+    except json.JSONDecodeError as e:
+        raise CaptionGenerationError(f"llama-server returned invalid JSON: {e}") from e
 
-    if result.returncode != 0:
-        stderr_excerpt = result.stderr.strip()[-500:]
-        raise CaptionGenerationError(
-            f"llama-mtmd-cli exited with code {result.returncode}: {stderr_excerpt}"
-        )
+    try:
+        caption = body["choices"][0]["message"]["content"].strip()
+    except (KeyError, IndexError, AttributeError) as e:
+        raise CaptionGenerationError(f"unexpected llama-server response shape: {e}") from e
 
-    caption = result.stdout.strip()
     if not caption:
         raise CaptionGenerationError("model produced no output")
 

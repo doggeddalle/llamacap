@@ -14,7 +14,6 @@ def sidecar_path_for(
 
     relative = image_path.relative_to(input_dir)
     target = output_dir / relative
-    target.parent.mkdir(parents=True, exist_ok=True)
     return target.with_suffix(suffix)
 
 
@@ -23,4 +22,5 @@ def should_skip(sidecar_path: Path, overwrite: bool) -> bool:
 
 
 def write_caption(sidecar_path: Path, caption: str) -> None:
+    sidecar_path.parent.mkdir(parents=True, exist_ok=True)
     sidecar_path.write_text(caption + "\n", encoding="utf-8")

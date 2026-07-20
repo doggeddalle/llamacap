@@ -8,8 +8,8 @@ description = "Natural-language LoRA captioning profile using Qwen3-VL-4B-Instru
 # See README.md "Setting the model" for details.
 gguf_path = ""
 mmproj_path = ""
-gguf_file = ""
-mmproj_file = ""
+gguf_file = "Qwen3-VL-4B-Instruct-Unredacted-MAX.Q8_0.gguf"
+mmproj_file = "Qwen3-VL-4B-Instruct-Unredacted-MAX.mmproj-q8_0.gguf"
 
 [prompt]
 # Relative to the project root. `text`, if non-empty, overrides `file`.

@@ -3,7 +3,12 @@
 Batch-captions images with a local llama.cpp GGUF vision-language model, producing
 per-image `.txt` sidecar captions for LoRA training data (Kohya-ss convention).
 
-Initial captioning scope profile is Krea 2, roadmap is to add more soon. Configs are entirely customizable and you can create your own.
+Includes both a command-line interface and a Tkinter GUI. The initial captioning
+scope profile is Krea 2; the roadmap is to add more soon. Profiles and configs are
+entirely customizable and you can create your own.
+
+> New here? See **[GUIDE.md](GUIDE.md)** for a step-by-step walkthrough covering
+> setup, the GUI, custom profiles, and troubleshooting.
 
 ## Setup
 
@@ -11,10 +16,44 @@ Initial captioning scope profile is Krea 2, roadmap is to add more soon. Configs
 uv sync
 ```
 
-Requires `llama-mtmd-cli` on PATH (e.g. `winget install ggml.llamacpp`), or set
+Requires `llama-server` on PATH (e.g. `winget install ggml.llamacpp`), or set
 `[llama_cpp].binary_path_override` in `config.toml`, or drop the binary in `bin/`.
+llamacap starts one `llama-server` process per run and keeps the model resident
+in memory for the whole batch, rather than reloading it per image.
 
-## Usage
+## Models
+
+The `models/` folder ships **empty** — GGUF weights are not distributed with the
+project. The bundled `krea2` profile expects this pair placed in `models/`:
+
+- `Qwen3-VL-4B-Instruct-Unredacted-MAX.Q8_0.gguf` (main model, ~4 GB)
+- `Qwen3-VL-4B-Instruct-Unredacted-MAX.mmproj-q8_0.gguf` (vision projector, ~433 MB)
+
+Alternatively, point at any GGUF + mmproj pair with `--model DIR` at run time, or
+edit the profile's `[model]` section (see "Setting the model" below).
+
+## GUI
+
+```
+llamacap-gui.bat
+```
+
+Double-click the launcher (or run `uv run python scripts/gui.py`). Modern flat
+Windows 11-style look (follows your system light/dark mode) with:
+
+- every CLI option as a form field (profile, folders, model override, trigger
+  word, resize, seed, limit, prompt, config, and the overwrite/recursive/
+  dry-run/verbose switches)
+- a **profile editor** — create and modify `profiles/*.toml` (including the
+  prompt text) without leaving the GUI
+- a real **progress bar** with live ok/skipped/failed counts
+- **drag-and-drop** a folder onto the window to set the input path
+- image-count preview, "Open folder" / "Open failure report" buttons, and a
+  Stop button that shuts the run (and its `llama-server` child) down cleanly
+
+Details in [GUIDE.md](GUIDE.md).
+
+## CLI usage
 
 ```
 uv run scripts/caption.py --list-profiles
@@ -34,7 +73,8 @@ Options: `--output-dir DIR`, `--overwrite`, `--recursive`, `--limit N`,
   are not searched.
 - `--size FLOAT` — resize images to this many target megapixels (aspect ratio
   preserved, upscaling allowed) before captioning. Overrides
-  `config.toml [preprocessing].resize_megapixels`.
+  `config.toml [preprocessing].resize_megapixels`; `--size 0` disables
+  resizing even when the config sets a default.
 - `--prompt TEXT` — override the profile's prompt text for this run.
 - `--seed INT` — override the profile's generation seed for this run.
 - `--dry-run` — resolve the binary, profile, model, and prompt, and report
@@ -44,17 +84,24 @@ Options: `--output-dir DIR`, `--overwrite`, `--recursive`, `--limit N`,
   project-root `config.toml`.
 - `--interactive` — when model resolution is ambiguous, prompt on the
   terminal to pick instead of failing fast. See "Setting the model" below.
+- `--progress-json` — emit machine-readable progress lines
+  (`@@LLAMACAP@@ {...}`) instead of the tqdm bar, for driving front-ends;
+  this is what the GUI uses for its progress bar.
 
 ## Profiles
 
 Profiles live in `profiles/*.toml` and configure the GGUF/mmproj model pair,
 the captioning prompt, an optional trigger/activation word, and generation
-parameters. See `profiles/krea2.toml` for the reference profile.
+parameters. See `profiles/krea2.toml` for the reference profile, or use the
+GUI's profile editor (Edit… / New… next to the profile dropdown).
+
+Only `[profile]`, `[model]`, and `[prompt]` are required — `[trigger_word]`,
+`[generation]`, and `[output]` fall back to sensible defaults (krea2's values)
+when omitted, so a minimal custom profile is just a few lines.
 
 ## Setting the model
 
-Profiles ship with an empty `[model]` section — you must point them at a
-GGUF + mmproj pair before running, using one of two methods:
+Point a profile at a GGUF + mmproj pair using one of two methods:
 
 1. **Edit the profile's `[model]` section** (persists across runs):
    - `gguf_path` / `mmproj_path` — absolute paths to the two files, or
@@ -62,7 +109,8 @@ GGUF + mmproj pair before running, using one of two methods:
      `[models].default_dir` in `config.toml` (defaults to `models/`).
 
    Only one of the two pairs is needed; `*_path` takes precedence if both
-   are set.
+   are set. The bundled `krea2` profile uses the bare-filename form, so it
+   works as soon as the model pair is dropped into `models/`.
 
 2. **Pass `--model DIR` at the command line** (per-run, no TOML edits):
    `DIR` must contain exactly one main `.gguf` and one `.gguf` with
@@ -79,3 +127,18 @@ candidate `.gguf`/mmproj file, prompts you to pick from a numbered list
 isn't a TTY). The same prompt is used if `--model DIR` itself points at an
 ambiguous directory with `--interactive` set. Off by default, so unattended
 or scripted runs never hang waiting on input.
+
+## Project structure
+
+```
+llamacap-gui.bat        GUI launcher (Windows)
+config.toml             Global settings (binary/model dirs, output, timeouts, ...)
+bin/                    Optional: drop llama-server.exe here
+models/                 GGUF model files go here (empty by default)
+profiles/               Captioning profiles (*.toml)
+prompts/                Prompt text files referenced by profiles
+scripts/caption.py      CLI entry point
+scripts/gui.py          GUI launcher
+src/llamacap/           The Python package (CLI, runner, server manager, ...)
+src/llamacap/gui/       The GUI application (app, profile editor, widgets)
+```

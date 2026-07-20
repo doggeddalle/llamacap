@@ -22,16 +22,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--overwrite", action="store_true", help="Regenerate captions even if a sidecar already exists")
     parser.add_argument("--recursive", action="store_true", help="Recurse into subdirectories")
     parser.add_argument("--limit", type=int, default=None, help="Only process the first N images")
-    parser.add_argument("--llama-bin", default=None, help="Override the resolved llama-mtmd-cli path for this run")
+    parser.add_argument("--llama-bin", default=None, help="Override the resolved llama-server path for this run")
     parser.add_argument("--list-profiles", action="store_true", help="List available profiles and exit")
     parser.add_argument("--trigger", default=None, help='Override the profile trigger word for this run (use "" to disable it)')
     parser.add_argument("--model", type=Path, default=None, help="Directory with exactly one .gguf and one *mmproj*.gguf; overrides the profile's [model]")
-    parser.add_argument("--size", type=float, default=None, help="Resize images to this many target megapixels before captioning")
+    parser.add_argument("--size", type=float, default=None, help="Resize images to this many target megapixels before captioning (0 disables resizing even if config.toml sets a default)")
     parser.add_argument("--prompt", default=None, help="Override the profile prompt text for this run")
     parser.add_argument("--seed", type=int, default=None, help="Override the profile generation seed for this run")
     parser.add_argument("--dry-run", action="store_true", help="Resolve everything and report what would happen, without captioning or writing files")
     parser.add_argument("--interactive", action="store_true", help="Prompt to pick a model when resolution is ambiguous, instead of failing fast (requires a real terminal)")
     parser.add_argument("--config", type=Path, default=None, help="Path to an alternate global config.toml")
+    parser.add_argument("--progress-json", action="store_true", help="Emit machine-readable progress lines instead of a progress bar (for front-ends)")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     return parser
 
@@ -47,6 +48,11 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         config = load_config(args.config) if args.config else load_config()
+
+        if not args.verbose:
+            # -v always wins; otherwise honor [logging].level from config.toml.
+            level = getattr(logging, config.logging.level.upper(), logging.INFO)
+            logging.getLogger().setLevel(level)
 
         if args.list_profiles:
             names = list_profile_names(config)
@@ -72,11 +78,12 @@ def main(argv: list[str] | None = None) -> int:
             llama_bin_override=args.llama_bin,
             trigger_override=args.trigger,
             model_dir=args.model,
-            resize_megapixels=args.size or 0.0,
+            resize_megapixels=args.size,
             prompt_override=args.prompt,
             seed_override=args.seed,
             dry_run=args.dry_run,
             interactive=args.interactive,
+            progress_json=args.progress_json,
         )
 
         result = run_batch(config, options)

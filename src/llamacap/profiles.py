@@ -13,22 +13,22 @@ PROFILES_DIR_NAME = "profiles"
 
 @dataclass
 class TriggerWordConfig:
-    value: str
-    placement: str
+    value: str = ""
+    placement: str = "prefix_comma"
 
 
 @dataclass
 class GenerationParams:
-    ctx_size: int
-    n_predict: int
-    temperature: float
-    top_p: float
-    top_k: int
-    repeat_penalty: float
-    ngl: int
-    image_min_tokens: int
-    seed: int
-    no_warmup: bool
+    ctx_size: int = 8192
+    n_predict: int = 220
+    temperature: float = 0.7
+    top_p: float = 0.9
+    top_k: int = 40
+    repeat_penalty: float = 1.1
+    ngl: int = 99
+    image_min_tokens: int = 1024
+    seed: int = 1337
+    no_warmup: bool = True
     extra_args: list[str] = field(default_factory=list)
 
 
@@ -88,18 +88,24 @@ def load_profile(
             f"{', '.join(available) if available else '(none)'}"
         )
 
-    with path.open("rb") as f:
-        data = tomllib.load(f)
+    try:
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
+        raise ProfileError(f"Profile '{name}' is not valid TOML: {e}") from e
 
     try:
         profile_meta = data["profile"]
         model = data["model"]
         prompt = data["prompt"]
-        trigger = data["trigger_word"]
-        generation = data["generation"]
-        output = data["output"]
     except KeyError as e:
         raise ProfileError(f"Profile '{name}' is missing required section: {e}") from e
+
+    # Optional sections fall back to sensible defaults (krea2's values), so a
+    # minimal profile only needs [profile], [model], and [prompt].
+    trigger = data.get("trigger_word", {})
+    generation = data.get("generation", {})
+    output = data.get("output", {})
 
     model_fields = ("gguf_path", "mmproj_path", "gguf_file", "mmproj_file")
     if model_override is not None:

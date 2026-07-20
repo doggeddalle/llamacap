@@ -13,8 +13,11 @@ overwrite = false
 recursive = false
 
 [generation]
-# Per-image subprocess timeout safety net (seconds).
+# Per-image request timeout safety net (seconds).
 timeout_seconds = 300
+# How long to wait for llama-server to load the model and report healthy
+# before giving up (seconds). Larger GGUFs need more time.
+server_startup_timeout_seconds = 120
 
 [logging]
 level = "INFO"

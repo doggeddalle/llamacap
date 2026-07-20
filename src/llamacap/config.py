@@ -12,30 +12,31 @@ DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.toml"
 
 @dataclass
 class LlamaCppConfig:
-    binary_path_override: str
-    bin_subdir: str
+    binary_path_override: str = ""
+    bin_subdir: str = "bin"
 
 
 @dataclass
 class ModelsConfig:
-    default_dir: str
+    default_dir: str = "models"
 
 
 @dataclass
 class OutputConfig:
-    default_mode: str
-    overwrite: bool
-    recursive: bool
+    default_mode: str = "in_place"
+    overwrite: bool = False
+    recursive: bool = False
 
 
 @dataclass
 class GenerationConfig:
-    timeout_seconds: int
+    timeout_seconds: int = 300
+    server_startup_timeout_seconds: int = 120
 
 
 @dataclass
 class LoggingConfig:
-    level: str
+    level: str = "INFO"
 
 
 @dataclass
@@ -58,8 +59,11 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> GlobalConfig:
     if not path.exists():
         raise LlamacapError(f"Global config not found: {path}")
 
-    with path.open("rb") as f:
-        data = tomllib.load(f)
+    try:
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
+        raise LlamacapError(f"Invalid TOML in config ({path}): {e}") from e
 
     try:
         return GlobalConfig(

@@ -7,8 +7,8 @@ from pathlib import Path
 from llamacap.config import GlobalConfig
 from llamacap.errors import BinaryNotFoundError
 
-BINARY_NAME = "llama-mtmd-cli"
-BINARY_EXE = "llama-mtmd-cli.exe"
+BINARY_NAME = "llama-server"
+BINARY_EXE = "llama-server.exe"
 
 logger = logging.getLogger("llamacap")
 
@@ -30,35 +30,35 @@ def _resolve_override(override: str) -> Path:
     )
 
 
-def resolve_llama_mtmd_cli(config: GlobalConfig, cli_override: str | None = None) -> Path:
+def resolve_llama_server(config: GlobalConfig, cli_override: str | None = None) -> Path:
     checked: list[str] = []
 
     if cli_override:
         checked.append(f"--llama-bin {cli_override}")
         path = _resolve_override(cli_override)
-        logger.info("Resolved llama-mtmd-cli via --llama-bin: %s", path)
+        logger.info("Resolved llama-server via --llama-bin: %s", path)
         return path
 
     if config.llama_cpp.binary_path_override:
         checked.append(f"config.toml binary_path_override = {config.llama_cpp.binary_path_override}")
         path = _resolve_override(config.llama_cpp.binary_path_override)
-        logger.info("Resolved llama-mtmd-cli via config.toml override: %s", path)
+        logger.info("Resolved llama-server via config.toml override: %s", path)
         return path
 
     on_path = shutil.which(BINARY_NAME)
     checked.append("PATH (shutil.which)")
     if on_path:
-        logger.info("Resolved llama-mtmd-cli via PATH: %s", on_path)
+        logger.info("Resolved llama-server via PATH: %s", on_path)
         return Path(on_path)
 
     local_bin = config.project_root / config.llama_cpp.bin_subdir / BINARY_EXE
     checked.append(str(local_bin))
     if local_bin.is_file():
-        logger.info("Resolved llama-mtmd-cli via local bin/ subdir: %s", local_bin)
+        logger.info("Resolved llama-server via local bin/ subdir: %s", local_bin)
         return local_bin
 
     raise BinaryNotFoundError(
-        "Could not find llama-mtmd-cli. Checked:\n  - "
+        "Could not find llama-server. Checked:\n  - "
         + "\n  - ".join(checked)
         + "\n\nInstall it with `winget install ggml.llamacpp`, place it in "
         f"{config.project_root / config.llama_cpp.bin_subdir}, or set "
