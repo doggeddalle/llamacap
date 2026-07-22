@@ -7,9 +7,7 @@ Includes both a command-line interface and a Tkinter GUI. The initial captioning
 scope profile is Krea 2; the roadmap is to add more soon. Profiles and configs are
 entirely customizable and you can create your own.
 
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/ea0896e2-fff1-4b11-8bad-9c93b25a7c46](https://github.com/user-attachments/assets/0584b75d-71ef-4d34-b445-43f6c2ea361e" alt="Screenshot 2026-07-20 130520" width="50%">
-</p>
+<img width="1348" height="983" alt="Untitled-1" src="https://github.com/user-attachments/assets/35ee963e-624e-4bd0-9116-2d46f98d7a77" />
 
 > New here? See **[GUIDE.md](GUIDE.md)** for a step-by-step walkthrough covering
 > setup, the GUI, custom profiles, and troubleshooting.
