@@ -78,6 +78,11 @@ class LlamacapGUI:
         self.images: tuple[Path, ...] = ()
         self.image_index = 0
         self.preview_photo = None
+        self._preview_source: Image.Image | None = None
+        self._preview_path: Path | None = None
+        self._preview_size: tuple[int, int] | None = None
+        self._preview_after: str | None = None
+        self._preview_generation = 0
         self._report_path: str | None = None
         self._refresh_generation = 0
         self._started_at = 0.0
@@ -232,7 +237,9 @@ class LlamacapGUI:
         body.add(image_frame, weight=3); body.add(caption_frame, weight=2)
         self.preview_label = ttk.Label(image_frame, text="Select an image folder", anchor="center")
         self.preview_label.pack(fill="both", expand=True)
-        self.preview_label.bind("<Configure>", lambda _e: self._render_preview())
+        # Configure fires continuously while a window or sash is dragged.
+        # Coalesce those events instead of decoding/resizing on every pixel.
+        self.preview_label.bind("<Configure>", self._schedule_preview_render)
         caption_frame.rowconfigure(0, weight=1); caption_frame.columnconfigure(0, weight=1)
         self.caption_editor = tk.Text(caption_frame, wrap="word", undo=True)
         self._style_text_widget(self.caption_editor)
@@ -401,28 +408,88 @@ class LlamacapGUI:
 
     def _show_image(self) -> None:
         if not self.images:
+            self._preview_generation += 1
+            self._preview_path = None
+            self._preview_source = None
+            self._preview_size = None
+            self.preview_photo = None
+            if self._preview_after is not None:
+                self.root.after_cancel(self._preview_after)
+                self._preview_after = None
             self.current_var.set("No image selected")
             if hasattr(self, "preview_label"): self.preview_label.configure(image="", text="No supported images found")
             if hasattr(self, "caption_editor"): self.caption_editor.delete("1.0", "end")
             return
         path = self.images[self.image_index]
         self.current_var.set(f"{self.image_index + 1} / {len(self.images)}  ·  {path.name}")
-        self._render_preview()
+        self._load_preview(path)
         sidecar = sidecar_path_for(path, Path(self.input_var.get()), self._effective_output_dir(), ".txt")
         try: text = sidecar.read_text(encoding="utf-8").rstrip()
         except OSError: text = ""
         self.caption_editor.delete("1.0", "end"); self.caption_editor.insert("1.0", text)
 
+    def _load_preview(self, path: Path) -> None:
+        """Decode once in the background; resizing then uses the cached pixels."""
+        if path == self._preview_path and self._preview_source is not None:
+            self._schedule_preview_render()
+            return
+        self._preview_generation += 1
+        generation = self._preview_generation
+        self._preview_path = path
+        self._preview_source = None
+        self._preview_size = None
+        self.preview_label.configure(image="", text="Loading preview…")
+
+        def decode() -> None:
+            try:
+                with Image.open(path) as opened:
+                    image = ImageOps.exif_transpose(opened).convert("RGB")
+                    image.load()
+                # The preview never needs full camera resolution. Build a
+                # high-quality display master off-thread to bound subsequent
+                # UI-thread copies and resizes even for 50–100 MP originals.
+                image.thumbnail((2048, 2048), Image.Resampling.LANCZOS)
+                error = None
+            except (OSError, ValueError) as exc:
+                image, error = None, str(exc)
+
+            def finish() -> None:
+                if generation != self._preview_generation or path != self._preview_path:
+                    return
+                if image is None:
+                    self.preview_label.configure(image="", text=f"Preview unavailable\n{error}")
+                    return
+                self._preview_source = image
+                self._schedule_preview_render(immediate=True)
+
+            self.root.after(0, finish)
+
+        threading.Thread(target=decode, daemon=True).start()
+
+    def _schedule_preview_render(self, _event=None, *, immediate: bool = False) -> None:
+        """Render once after a burst of geometry changes, keeping sash drags fluid."""
+        if self._preview_after is not None:
+            self.root.after_cancel(self._preview_after)
+        delay = 0 if immediate else 75
+        self._preview_after = self.root.after(delay, self._render_preview)
+
     def _render_preview(self) -> None:
-        if not self.images or not hasattr(self, "preview_label"): return
-        try:
-            with Image.open(self.images[self.image_index]) as source:
-                image = ImageOps.exif_transpose(source).convert("RGB")
-                width = max(100, self.preview_label.winfo_width() - 16); height = max(100, self.preview_label.winfo_height() - 16)
-                image.thumbnail((width, height), Image.Resampling.LANCZOS)
-                self.preview_photo = ImageTk.PhotoImage(image)
-            self.preview_label.configure(image=self.preview_photo, text="")
-        except OSError as exc: self.preview_label.configure(image="", text=f"Preview unavailable\n{exc}")
+        self._preview_after = None
+        if self._preview_source is None or not hasattr(self, "preview_label"):
+            return
+        target = (
+            max(100, self.preview_label.winfo_width() - 16),
+            max(100, self.preview_label.winfo_height() - 16),
+        )
+        if target == self._preview_size:
+            return
+        # Copying an already-decoded RGB image is substantially cheaper than
+        # reopening and EXIF-normalizing the original on every resize.
+        image = self._preview_source.copy()
+        image.thumbnail(target, Image.Resampling.LANCZOS)
+        self.preview_photo = ImageTk.PhotoImage(image)
+        self._preview_size = target
+        self.preview_label.configure(image=self.preview_photo, text="")
 
     def _save_caption(self) -> None:
         if not self.images: return
