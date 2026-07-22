@@ -34,8 +34,10 @@ class BatchOptions:
     recursive: bool
     limit: int | None
     llama_bin_override: str | None
+    single_image: Path | None = None
     trigger_override: str | None = None
     model_dir: Path | None = None
+    model_files: tuple[Path, Path] | None = None
     # None = fall back to config.toml; an explicit 0 disables resizing.
     resize_megapixels: float | None = None
     prompt_override: str | None = None
@@ -60,11 +62,11 @@ class BatchResult:
 def run_batch(config: GlobalConfig, options: BatchOptions) -> BatchResult:
     binary = resolve_llama_server(config, options.llama_bin_override)
 
-    model_override = (
-        resolve_model_dir(options.model_dir, interactive=options.interactive)
-        if options.model_dir is not None
-        else None
-    )
+    model_override = options.model_files
+    if model_override is None and options.model_dir is not None:
+        model_override = resolve_model_dir(
+            options.model_dir, interactive=options.interactive
+        )
     profile: Profile = load_profile(
         options.profile_name, config, model_override, interactive=options.interactive
     )
@@ -94,7 +96,11 @@ def run_batch(config: GlobalConfig, options: BatchOptions) -> BatchResult:
     if resize_megapixels:
         logger.info("Resize target: %.2f MP", resize_megapixels)
 
-    images = list_images(options.input_dir, options.recursive)
+    images = (
+        [options.single_image]
+        if options.single_image is not None
+        else list_images(options.input_dir, options.recursive)
+    )
     if options.limit is not None:
         images = images[: options.limit]
 
@@ -114,7 +120,7 @@ def run_batch(config: GlobalConfig, options: BatchOptions) -> BatchResult:
     server = LlamaServer(binary, profile, config.generation.server_startup_timeout_seconds)
 
     if options.progress_json:
-        _emit_progress("start", total=len(images))
+        _emit_progress("phase", phase="loading", total=len(images))
         bar = None
         iterator = images
     else:
@@ -123,6 +129,8 @@ def run_batch(config: GlobalConfig, options: BatchOptions) -> BatchResult:
 
     try:
         server.start()
+        if options.progress_json:
+            _emit_progress("start", total=len(images))
 
         for done, image_path in enumerate(iterator, start=1):
             _process_image(

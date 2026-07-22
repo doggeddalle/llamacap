@@ -76,6 +76,7 @@ class ProfileEditor(tk.Toplevel):
         self.app = app
         self.px = app.px
         self.existing_name = existing_name
+        self.configure(background=app.palette["bg"])
 
         source = existing_name or template_name
         self.title(f"Edit profile: {existing_name}" if existing_name else "New profile")

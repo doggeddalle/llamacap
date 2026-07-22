@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
 import sys
 from pathlib import Path
 
@@ -11,6 +12,20 @@ from llamacap.profiles import list_profile_names
 from llamacap.runner import BatchOptions, run_batch
 
 
+def _non_negative_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed < 0:
+        raise argparse.ArgumentTypeError("must be a finite number zero or greater")
+    return parsed
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="llamacap",
@@ -18,15 +33,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--profile", help="Profile name (see --list-profiles)")
     parser.add_argument("--input", type=Path, help="Directory of images to caption")
+    parser.add_argument("--image", type=Path, default=None, help="Caption one specific image from --input")
     parser.add_argument("--output-dir", type=Path, default=None, help="Write sidecars here instead of in-place")
-    parser.add_argument("--overwrite", action="store_true", help="Regenerate captions even if a sidecar already exists")
-    parser.add_argument("--recursive", action="store_true", help="Recurse into subdirectories")
-    parser.add_argument("--limit", type=int, default=None, help="Only process the first N images")
+    parser.add_argument(
+        "--overwrite", action=argparse.BooleanOptionalAction, default=None,
+        help="Regenerate captions even if a sidecar exists (or override config with --no-overwrite)",
+    )
+    parser.add_argument(
+        "--recursive", action=argparse.BooleanOptionalAction, default=None,
+        help="Recurse into subdirectories (or override config with --no-recursive)",
+    )
+    parser.add_argument("--limit", type=_positive_int, default=None, help="Only process the first N images")
     parser.add_argument("--llama-bin", default=None, help="Override the resolved llama-server path for this run")
     parser.add_argument("--list-profiles", action="store_true", help="List available profiles and exit")
     parser.add_argument("--trigger", default=None, help='Override the profile trigger word for this run (use "" to disable it)')
     parser.add_argument("--model", type=Path, default=None, help="Directory with exactly one .gguf and one *mmproj*.gguf; overrides the profile's [model]")
-    parser.add_argument("--size", type=float, default=None, help="Resize images to this many target megapixels before captioning (0 disables resizing even if config.toml sets a default)")
+    parser.add_argument("--model-gguf", type=Path, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--model-mmproj", type=Path, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--size", type=_non_negative_float, default=None, help="Resize images to this many target megapixels before captioning (0 disables resizing even if config.toml sets a default)")
     parser.add_argument("--prompt", default=None, help="Override the profile prompt text for this run")
     parser.add_argument("--seed", type=int, default=None, help="Override the profile generation seed for this run")
     parser.add_argument("--dry-run", action="store_true", help="Resolve everything and report what would happen, without captioning or writing files")
@@ -67,17 +91,43 @@ def main(argv: list[str] | None = None) -> int:
 
         if not args.input.is_dir():
             raise LlamacapError(f"--input is not a directory: {args.input}")
+        if args.image is not None:
+            if not args.image.is_file():
+                raise LlamacapError(f"--image is not a file: {args.image}")
+            try:
+                args.image.resolve().relative_to(args.input.resolve())
+            except ValueError as e:
+                raise LlamacapError("--image must be inside --input") from e
+
+        exact_model = args.model_gguf is not None or args.model_mmproj is not None
+        if exact_model and (args.model_gguf is None or args.model_mmproj is None):
+            raise LlamacapError("--model-gguf and --model-mmproj must be supplied together")
+        if exact_model and args.model is not None:
+            raise LlamacapError("Use either --model or the exact model file pair, not both")
+        if exact_model:
+            if not args.model_gguf.is_file():
+                raise LlamacapError(f"GGUF model file not found: {args.model_gguf}")
+            if not args.model_mmproj.is_file():
+                raise LlamacapError(f"mmproj model file not found: {args.model_mmproj}")
 
         options = BatchOptions(
             profile_name=args.profile,
             input_dir=args.input,
-            output_dir=args.output_dir,
-            overwrite=args.overwrite or config.output.overwrite,
-            recursive=args.recursive or config.output.recursive,
+            single_image=args.image,
+            output_dir=(
+                args.output_dir
+                if args.output_dir is not None
+                else config.project_root / config.output.default_dir
+                if config.output.default_mode == "output_dir"
+                else None
+            ),
+            overwrite=config.output.overwrite if args.overwrite is None else args.overwrite,
+            recursive=config.output.recursive if args.recursive is None else args.recursive,
             limit=args.limit,
             llama_bin_override=args.llama_bin,
             trigger_override=args.trigger,
             model_dir=args.model,
+            model_files=(args.model_gguf, args.model_mmproj) if exact_model else None,
             resize_megapixels=args.size,
             prompt_override=args.prompt,
             seed_override=args.seed,

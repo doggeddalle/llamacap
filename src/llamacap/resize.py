@@ -4,7 +4,7 @@ import logging
 import math
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 logger = logging.getLogger("llamacap")
 
@@ -18,6 +18,9 @@ def resize_for_analysis(image_path: Path, target_megapixels: float, tmp_dir: Pat
     target_px = target_megapixels * 1_000_000
 
     with Image.open(image_path) as img:
+        # Normalize camera orientation before calculating dimensions or sending
+        # the resized pixels; otherwise portrait phone photos can be sideways.
+        img = ImageOps.exif_transpose(img)
         width, height = img.size
         current_px = width * height
 

@@ -9,6 +9,8 @@ default_dir = "models"
 
 [output]
 default_mode = "in_place"   # in_place | output_dir
+# Used when default_mode = "output_dir" and --output-dir is not supplied.
+default_dir = "captions"
 overwrite = false
 recursive = false
 

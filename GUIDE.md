@@ -92,12 +92,16 @@ window lingers), or from a terminal:
 uv run python scripts/gui.py
 ```
 
-The GUI uses a flat Windows 11-style theme and follows your Windows light/dark
-mode automatically. You can also **drag and drop a folder** from Explorer anywhere
-onto the window to set the input path (or onto the output field to set that).
-Hover the less obvious fields for tooltips.
+The GUI uses a flat Windows 11-style theme and offers System, Light, and Dark
+appearance modes. You can also **drag and drop a folder** from Explorer anywhere
+onto the window to set the input path.
 
-The window is organized top to bottom:
+The window has two tabs: **Caption** for everyday dataset work and **Profiles &
+Settings** for profile maintenance, appearance, alternate configuration, and
+keyboard help. The Caption tab uses a resizable split view: setup and readiness
+on the left, image/caption review and run status on the right. Folders, profile,
+theme, window geometry, recursion choice, and disclosure-panel states are
+remembered. Overwrite and prompt overrides deliberately are not persisted.
 
 ### Profile & paths
 
@@ -114,9 +118,9 @@ The window is organized top to bottom:
 ### Model override (optional)
 
 - **GGUF model** / **mmproj file** — pick a main `.gguf` and its `*mmproj*.gguf`
-  to use instead of the profile's `[model]` settings for this run. Both files
-  must live in the same folder (the GUI passes their folder as `--model DIR`).
-  Leave blank to use what the profile configures.
+  to use instead of the profile's `[model]` settings for this run. The GUI passes
+  this exact pair, so other GGUF files in the same folder do not cause ambiguity.
+  Leave both blank to use what the profile configures.
 
 ### Per-run overrides (optional)
 
@@ -138,9 +142,10 @@ The window is organized top to bottom:
 - **Overwrite existing sidecars** — by default images that already have a
   `.txt` sidecar are skipped; check this to re-caption them.
 - **Recurse into subfolders** — include images in subdirectories.
-- **Dry run (report only)** — resolve everything and report counts without
-  captioning or writing files.
-- **Verbose logging** — debug-level output in the log pane.
+- **Preview run** — resolve everything and report counts without captioning or
+  writing files.
+- **Verbose diagnostic logging** — available on Profiles & Settings; adds debug
+  output to Technical details.
 
 ### Running
 
@@ -148,7 +153,22 @@ The window is organized top to bottom:
 progress bar animates with "Starting llama-server / loading model…", then
 switches to a real per-image bar with a live status line
 (`12/120 — 11 ok · 1 skipped · 0 failed`). Full output still streams into the
-**Output** log pane.
+collapsible **Technical details** pane. The status card also reports the current
+phase and filename, elapsed time, ETA, and color-coded result counts.
+
+**Preview run** validates and reports the batch without writing captions.
+Before an overwrite run, the GUI reports how many captions would be replaced
+and asks for confirmation. The setup-readiness card checks llama-server, model
+files, supported images, and output writability before a run.
+
+The preview pane displays each image with EXIF orientation applied and loads its
+current sidecar. Use the arrow buttons (or Left/Right keys) to browse, **Save
+caption** to edit a sidecar atomically, and **Caption this image** to regenerate
+only the displayed item using the exact selected GGUF/mmproj files.
+
+Keyboard shortcuts: Ctrl+O chooses the input folder, Ctrl+Enter runs the batch,
+Ctrl+Shift+Enter previews it, Ctrl+S saves the displayed caption, Left/Right
+navigate images, and Escape stops an active run.
 
 **Stop** first asks the process tree to exit cleanly and force-kills it after
 3 seconds if needed — either way the `llama-server` child dies too, so no model
@@ -259,6 +279,8 @@ Global settings that apply to every profile/run (override per-run with `--config
     `--interactive` scanning resolve (default `models`).
 - `[output]`
   - `default_mode` — `in_place` (sidecars next to images) or `output_dir`.
+  - `default_dir` — destination used in `output_dir` mode when `--output-dir`
+    is omitted (default `captions`, relative to the project root).
   - `overwrite`, `recursive` — defaults for the corresponding flags.
 - `[generation]`
   - `timeout_seconds` — per-image request safety net (default 300).

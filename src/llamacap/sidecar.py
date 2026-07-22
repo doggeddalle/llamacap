@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
 
@@ -22,5 +24,25 @@ def should_skip(sidecar_path: Path, overwrite: bool) -> bool:
 
 
 def write_caption(sidecar_path: Path, caption: str) -> None:
+    """Atomically replace a caption so interruptions cannot leave a partial file."""
     sidecar_path.parent.mkdir(parents=True, exist_ok=True)
-    sidecar_path.write_text(caption + "\n", encoding="utf-8")
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            prefix=f".{sidecar_path.name}.",
+            suffix=".tmp",
+            dir=sidecar_path.parent,
+            delete=False,
+        ) as temp_file:
+            temp_file.write(caption + "\n")
+            temp_path = Path(temp_file.name)
+        os.replace(temp_path, sidecar_path)
+    finally:
+        if temp_path is not None and temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass

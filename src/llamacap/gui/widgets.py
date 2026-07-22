@@ -5,6 +5,37 @@ import tkinter as tk
 from tkinter import ttk
 
 
+class Collapsible(ttk.Frame):
+    """Keyboard-accessible disclosure section with a content frame."""
+
+    def __init__(self, master, text: str, *, open: bool = False, command=None):
+        super().__init__(master)
+        self._text = text
+        self._open = open
+        self._command = command
+        self.button = ttk.Button(self, command=self.toggle, style="Disclosure.TButton")
+        self.button.pack(fill="x")
+        self.content = ttk.Frame(self, padding=(8, 6))
+        self._sync()
+
+    @property
+    def is_open(self) -> bool:
+        return self._open
+
+    def toggle(self) -> None:
+        self._open = not self._open
+        self._sync()
+        if self._command:
+            self._command(self._open)
+
+    def _sync(self) -> None:
+        self.button.configure(text=f"{'▾' if self._open else '▸'}  {self._text}")
+        if self._open:
+            self.content.pack(fill="both", expand=True)
+        else:
+            self.content.pack_forget()
+
+
 class Tooltip:
     """Hover tooltip for any widget. Shows after a short delay, follows theme
     colors passed in by the app."""

@@ -42,18 +42,18 @@ edit the profile's `[model]` section (see "Setting the model" below).
 llamacap-gui.bat
 ```
 
-Double-click the launcher (or run `uv run python scripts/gui.py`). Modern flat
-Windows 11-style look (follows your system light/dark mode) with:
+Double-click the launcher (or run `uv run python scripts/gui.py`). The task-focused
+two-tab workspace includes:
 
-- every CLI option as a form field (profile, folders, model override, trigger
-  word, resize, seed, limit, prompt, config, and the overwrite/recursive/
-  dry-run/verbose switches)
-- a **profile editor** — create and modify `profiles/*.toml` (including the
-  prompt text) without leaving the GUI
-- a real **progress bar** with live ok/skipped/failed counts
-- **drag-and-drop** a folder onto the window to set the input path
-- image-count preview, "Open folder" / "Open failure report" buttons, and a
-  Stop button that shuts the run (and its `llama-server` child) down cleanly
+- first-run checks for llama-server, model files, images, and output writability
+- a resizable image preview and caption editor with atomic saves and one-image
+  regeneration
+- exact GGUF/mmproj selection, inline validation, overwrite forecasting, and a
+  safe preview-run action
+- phase, filename, elapsed time, ETA, color-coded counts, and a collapsible log
+- persistent folders/profile/theme/layout with System, Light, and Dark themes
+- profile creation/editing, drag-and-drop, keyboard shortcuts, and clean Stop
+  behavior for the complete process tree
 
 Details in [GUIDE.md](GUIDE.md).
 
@@ -64,7 +64,8 @@ uv run scripts/caption.py --list-profiles
 uv run scripts/caption.py --profile krea2 --input C:\path\to\images
 ```
 
-Options: `--output-dir DIR`, `--overwrite`, `--recursive`, `--limit N`,
+Options: `--output-dir DIR`, `--overwrite` / `--no-overwrite`,
+`--recursive` / `--no-recursive`, `--limit N`,
 `--llama-bin PATH`, `-v/--verbose`.
 
 ### Per-run overrides

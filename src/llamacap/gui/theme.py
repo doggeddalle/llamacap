@@ -25,6 +25,9 @@ PALETTES = {
         "trough": "#e8e8e8",
         "text_bg": "#ffffff",
         "text_fg": "#1b1b1b",
+        "error": "#c42b1c",
+        "warning": "#8a5700",
+        "success": "#107c10",
     },
     "dark": {
         "bg": "#202020",
@@ -40,10 +43,31 @@ PALETTES = {
         "trough": "#3a3a3a",
         "text_bg": "#1c1c1c",
         "text_fg": "#f0f0f0",
+        "error": "#ff99a4",
+        "warning": "#f5c26b",
+        "success": "#6ccb5f",
     },
 }
 
 BASE_FONT = ("Segoe UI", 10)
+
+
+def _set_windows_titlebar(root: tk.Tk, dark: bool) -> None:
+    """Ask DWM to match the native title bar to the app theme."""
+    if root.tk.call("tk", "windowingsystem") != "win32":
+        return
+    try:
+        from ctypes import byref, c_int, windll
+
+        root.update_idletasks()
+        value = c_int(1 if dark else 0)
+        hwnd = windll.user32.GetParent(root.winfo_id())
+        # Attribute 20 is supported by current Windows 10/11; 19 covers older builds.
+        result = windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, byref(value), 4)
+        if result != 0:
+            windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, byref(value), 4)
+    except Exception:
+        pass
 
 
 def apply_theme(root: tk.Tk, theme: str) -> dict:
@@ -53,6 +77,7 @@ def apply_theme(root: tk.Tk, theme: str) -> dict:
     style.theme_use("clam")
 
     root.configure(background=p["bg"])
+    _set_windows_titlebar(root, theme == "dark")
 
     style.configure(
         ".",
@@ -70,6 +95,49 @@ def apply_theme(root: tk.Tk, theme: str) -> dict:
         font=BASE_FONT,
     )
 
+    # Explicitly own every container surface. Clam otherwise leaks platform
+    # defaults (notably white notebook tabs on Windows dark mode).
+    style.configure("TFrame", background=p["bg"])
+    style.configure("TLabel", background=p["bg"], foreground=p["fg"])
+    style.configure("TPanedwindow", background=p["border"], sashwidth=5)
+    style.configure("Sash", sashthickness=5, background=p["border"])
+
+    style.configure(
+        "TNotebook",
+        background=p["bg"],
+        bordercolor=p["border"],
+        lightcolor=p["border"],
+        darkcolor=p["border"],
+        tabmargins=(8, 8, 8, 0),
+    )
+    style.configure(
+        "TNotebook.Tab",
+        background=p["bg"],
+        foreground=p["muted"],
+        bordercolor=p["bg"],
+        lightcolor=p["bg"],
+        darkcolor=p["bg"],
+        padding=(16, 8),
+        focuscolor=p["accent"],
+    )
+    style.map(
+        "TNotebook.Tab",
+        background=[
+            ("selected", p["surface"]),
+            ("active", p["hover"]),
+            ("!selected", p["bg"]),
+        ],
+        foreground=[
+            ("selected", p["fg"]),
+            ("active", p["fg"]),
+            ("disabled", p["muted"]),
+            ("!selected", p["muted"]),
+        ],
+        bordercolor=[("selected", p["accent"]), ("!selected", p["bg"])],
+        lightcolor=[("selected", p["accent"]), ("!selected", p["bg"])],
+        darkcolor=[("selected", p["accent"]), ("!selected", p["bg"])],
+    )
+
     style.configure("TLabelframe", background=p["bg"], bordercolor=p["border"])
     style.configure(
         "TLabelframe.Label",
@@ -78,6 +146,10 @@ def apply_theme(root: tk.Tk, theme: str) -> dict:
         font=("Segoe UI", 10, "bold"),
     )
     style.configure("Muted.TLabel", foreground=p["muted"])
+    style.configure("Error.TLabel", foreground=p["error"])
+    style.configure("Warning.TLabel", foreground=p["warning"])
+    style.configure("Success.TLabel", foreground=p["success"])
+    style.configure("Status.TLabel", font=("Segoe UI", 11, "bold"))
     style.configure(
         "Tooltip.TLabel",
         background=p["surface"],
@@ -94,9 +166,19 @@ def apply_theme(root: tk.Tk, theme: str) -> dict:
         padding=(10, 4),
         relief="flat",
     )
+    style.configure(
+        "Disclosure.TButton", background=p["bg"], borderwidth=0,
+        padding=(4, 6), anchor="w",
+    )
     style.map(
         "TButton",
-        background=[("pressed", p["pressed"]), ("active", p["hover"])],
+        background=[
+            ("disabled", p["bg"]),
+            ("pressed", p["pressed"]),
+            ("active", p["hover"]),
+        ],
+        foreground=[("disabled", p["muted"])],
+        bordercolor=[("focus", p["accent"]), ("disabled", p["border"])],
     )
     style.configure(
         "Accent.TButton",
@@ -159,6 +241,12 @@ def apply_theme(root: tk.Tk, theme: str) -> dict:
         arrowcolor=p["muted"],
     )
     style.map("Vertical.TScrollbar", background=[("active", p["hover"])])
+    style.configure(
+        "Horizontal.TScrollbar",
+        background=p["surface"], troughcolor=p["bg"], bordercolor=p["bg"],
+        arrowcolor=p["muted"],
+    )
+    style.map("Horizontal.TScrollbar", background=[("active", p["hover"])])
 
     # The Combobox dropdown is a plain tk listbox; style it via the option db.
     root.option_add("*TCombobox*Listbox.background", p["surface"])

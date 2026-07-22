@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,7 @@ class ModelsConfig:
 @dataclass
 class OutputConfig:
     default_mode: str = "in_place"
+    default_dir: str = "captions"
     overwrite: bool = False
     recursive: bool = False
 
@@ -66,7 +68,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> GlobalConfig:
         raise LlamacapError(f"Invalid TOML in config ({path}): {e}") from e
 
     try:
-        return GlobalConfig(
+        config = GlobalConfig(
             llama_cpp=LlamaCppConfig(**data.get("llama_cpp", {})),
             models=ModelsConfig(**data.get("models", {})),
             output=OutputConfig(**data.get("output", {})),
@@ -76,3 +78,21 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> GlobalConfig:
         )
     except TypeError as e:
         raise LlamacapError(f"Malformed config.toml ({path}): {e}") from e
+
+    try:
+        if config.output.default_mode not in {"in_place", "output_dir"}:
+            raise ValueError("output.default_mode must be 'in_place' or 'output_dir'")
+        if config.generation.timeout_seconds <= 0:
+            raise ValueError("generation.timeout_seconds must be greater than zero")
+        if config.generation.server_startup_timeout_seconds <= 0:
+            raise ValueError(
+                "generation.server_startup_timeout_seconds must be greater than zero"
+            )
+        resize_target = config.preprocessing.resize_megapixels
+        if not math.isfinite(resize_target) or resize_target < 0:
+            raise ValueError(
+                "preprocessing.resize_megapixels must be a finite number zero or greater"
+            )
+    except (TypeError, ValueError) as e:
+        raise LlamacapError(f"Malformed config.toml ({path}): {e}") from e
+    return config
